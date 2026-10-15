@@ -1,0 +1,19 @@
+{
+  "slug": "minimax-frontend-dev",
+  "name": "MiniMax Frontend Dev",
+  "version": "1.0.1",
+  "installedAt": 1789798737050,
+  "source": "skillhub",
+  "namespace": "clawhub_daidai8910g",
+  "canonicalName": "@clawhub_daidai8910g/minimax-frontend-dev",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/a4e49550-e527-4406-b761-c4f2e607b757.png",
+  "labels": {
+    "requires_api_key": "true"
+  },
+  "description_zh": "全栈前端开发，融合精品 UI 设计、电影级动效、AI 生成素材、说服性文案和视觉艺术，构建...",
+  "description_en": "Full-stack frontend development combining premium UI design, cinematic animations, AI-generated media assets, persuasive copywriting, and visual art. Builds...",
+  "installs": 2158,
+  "iconLocalPath": "C:\\Users\\26320\\.workbuddy\\skills\\minimax-frontend-dev__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/a4e49550-e527-4406-b761-c4f2e607b757.png",
+  "installedContentHash": "sha256:4ca985dd06713d30bc14e77b74978d0f905a3648631813985aa337dfdd232401"
+}
