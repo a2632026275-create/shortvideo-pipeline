@@ -98,6 +98,65 @@ project.save()
 - 草稿名带批次主题标识，避免与旧草稿混；**剪映运行中草稿目录会被锁定**，删除旧草稿会触发沙箱 SAFE_DELETE 拦截——重建草稿时优先换新名字，旧草稿让用户关闭剪映后手动删。
 - 音色用剪映原生 speaker_id（如知性女声=晓晓：`BV009_DPE_streaming`，SAMI TTS 失败自动 fallback 到 edge-tts 同名音色）。
 
+### 字幕样式落地（关键词高亮 + 统一 17 号）
+
+`add_narrated_subtitles` 默认产出 **5 号白色**字幕，与默认基线不符。`project.save()` 之后对草稿做一次样式后处理（直接改 `draft_info.json`，**必须先关闭剪映**）：
+
+1. **统一字号**：遍历 `materials.texts`，把每条 `content.styles[*].size` 置为 `17.0`。
+2. **关键词高亮**：把 `content.styles` 从「单段整句」改写为「多段平铺」——正文白与关键词金交替覆盖 `[0, len(text)]`，每段都是完整样式对象（含 `fill / range / size / bold / italic / underline / strokes`），格式与 pyJianYingDraft 富文本导出一致。
+3. **关键词来源**：在脚本里逐句手工定义 `文案 → 关键词列表`，不要用分词模型猜；同一关键词多次出现时全部高亮。
+4. 改完 json 用备份兜底，重启剪映后再打开草稿（避免文件监视/缓存冲突）。
+
+```python
+# scripts/style_subtitles.py（放项目根 scripts/，禁止写进 skill 目录）
+import json, os, shutil
+from copy import deepcopy
+
+INFO = r".../com.lveditor.draft/<草稿名>/draft_info.json"
+SIZE, HL, BODY = 17.0, [1.0, 0.85, 0.2], [1.0, 1.0, 1.0]
+KEYWORDS = {"记住一句话：每餐一拳主食": ["一拳主食"], "先吃菜": ["先吃菜"]}  # 逐句定义
+
+def build_styles(text, base):
+    spans = []
+    for kw in KEYWORDS.get(text, []):
+        i = text.find(kw)
+        while i != -1:
+            spans.append((i, i + len(kw)))
+            i = text.find(kw, i + len(kw))
+    spans.sort()
+
+    def mk(a, b, color):
+        st = deepcopy(base)
+        st["range"] = [a, b]
+        st["size"] = SIZE
+        st["fill"]["content"]["solid"]["color"] = list(color)
+        return st
+
+    out, pos = [], 0
+    for s, e in spans:
+        if s > pos:
+            out.append(mk(pos, s, BODY))
+        out.append(mk(s, e, HL))
+        pos = e
+    if spans and pos < len(text):
+        out.append(mk(pos, len(text), BODY))
+    if not spans:
+        out.append(mk(0, len(text), BODY))
+    return out
+
+data = json.load(open(INFO, encoding="utf-8"))
+shutil.copyfile(INFO, INFO + ".bak")          # 先备份
+for t in data["materials"]["texts"]:
+    c = json.loads(t["content"])
+    c["styles"] = build_styles(c["text"], c["styles"][0])
+    t["content"] = json.dumps(c, ensure_ascii=False)
+json.dump(data, open(INFO, "w", encoding="utf-8"), ensure_ascii=False)
+```
+
+**红线**：
+- ⚠️ **不要把草稿 json 顶层 `fps` 写成 60**：剪映 11.6 会启动后 1–2 分钟内必崩（fps=30 实测稳定）。60fps 只能在导出面板设置。
+- ⚠️ 剪映运行中不要改 `draft_info.json`，否则易触发文件监视刷新崩溃；改前先关剪映，改后重开。
+
 ---
 
 ## 阶段 5：成片 / 发布
@@ -106,10 +165,17 @@ project.save()
 
 **步骤**：
 1. 用户在剪映打开阶段4生成的草稿，手动精修（节奏/字幕样式/局部裁切）。
-2. 导出方式二选一：
-   - 手动：剪映内导出。
-   - 无头：`python <JY_SKILL_ROOT>/scripts/auto_exporter.py "<草稿名>" "<输出.mp4>" --res 1080 --fps 60`（Windows UI 自动化）。
-3. 成片归档到 `剪辑/03_新剪辑归档/<批次>/`，发布到抖音 / 小红书等为用户手工环节。
+2. 导出设置：分辨率保持原始 1080×1920；若要求 60fps，**在导出面板把帧率切到 60fps**（不要改草稿）。
+3. 导出方式二选一：
+   - 手动：剪映内导出（默认导出路径常为上次使用目录，导出后核对并归档到批次目录）。
+   - 无头：`python <JY_SKILL_ROOT>/scripts/auto_exporter.py "<草稿名>" "<输出.mp4>" --res 1080 --fps 60`——**仅适用于剪映 6 及以下**；11.x（CEF+QML）UIA 元素树为空，会报"未找到草稿"。
+4. 成片归档到 `剪辑/03_新剪辑归档/<批次>/`（或用户指定目录），发布到抖音 / 小红书等为用户手工环节。
+
+**保底渲染（剪映导出不稳定时）**：用 ffmpeg 直接读 `draft_info.json` 时间轴渲染——
+- 视频：按 `VideoTrack` 各段 `source_timerange` 裁切后 concat，`fps=60`；
+- 音频：`VoiceOver` 20 段 `adelay` 后 `amix`，BGM 段按 `volume`（通常 0.6）混入；
+- 字幕：生成 ASS 硬字幕——金色 `\c&H33D9FF&`、`Fontsize≈130`（≈ 剪映 17 号）、黑描边 `Outline=3`、每行 ≤9 字且标点优先断行、`MarginV 165`；
+- 参考实现见各项目 `scripts/render_final.py`。
 
 ---
 
@@ -117,5 +183,7 @@ project.save()
 
 - **Pexels 找不到某镜头**：判断是否为 MG 动画/概念类（数字跳动、抽象图形等），是则走 Miora；写实可拍类再换关键词重搜 Pexels。
 - **草稿打不开/损坏**：用 `overwrite=True` 重新初始化 `JyProject` 触发自修复（支持 v5.9+）。
-- **导出失败**：优先手动导出；无头导出依赖 Windows UI 自动化，剪映版本变动可能失效。
+- **导出失败**：优先手动导出；11.x 剪映的无头导出（UIA 自动化）已失效，别在 auto_exporter 上死磕。
+- **字幕没高亮 / 字号不对**：检查 `content.styles` 是否被改回单段、`size` 是否为 `17.0`；改完 json 必须重启剪映再看。
+- **改完字幕后剪映崩溃**：先看顶层 `fps` 是否被写成 60（必须 30）；再确认 json 结构与备份一致，用 `.bak` 回滚。
 - **主题不明**：阶段1前主动问一句主题归属，再定画面调性，避免套错风格。
